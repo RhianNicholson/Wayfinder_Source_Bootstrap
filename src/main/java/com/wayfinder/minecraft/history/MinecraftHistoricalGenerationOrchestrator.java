@@ -48,8 +48,7 @@ public final class MinecraftHistoricalGenerationOrchestrator {
         if (!work.requiresPhysicalization() || work.targetNodeId().isEmpty()) {
             return new Result(
                     generated.committedEvent().isPresent(),
-                    false,
-                    0,
+                    false, 0,
                     generated.decision().roll(),
                     generated.decision().threshold());
         }
@@ -57,7 +56,22 @@ public final class MinecraftHistoricalGenerationOrchestrator {
         var nodeId = work.targetNodeId().orElseThrow();
         var record = materialization.find(nodeId).orElseThrow();
 
-        int removed = new MinecraftRouteLossApplier().removeRecordedStructure(level, record);
+        /*
+         * The domain planner identifies a historically relevant target. Exact
+         * Minecraft block truth decides whether the consequence is still
+         * physically pending. This avoids using DAMAGED/LOST as a proxy.
+         */
+        var physicalTruth = new MinecraftRouteLossPhysicalizationInspector();
+        if (!physicalTruth.requiresPhysicalization(level, record)) {
+            return new Result(
+                    generated.committedEvent().isPresent(),
+                    false, 0,
+                    generated.decision().roll(),
+                    generated.decision().threshold());
+        }
+
+        int removed = new MinecraftRouteLossApplier()
+                .removeRecordedStructure(level, record);
 
         var inspection = new MaterializationInspector().inspect(
                 record, new MinecraftMaterializationBlockView(level));
@@ -69,16 +83,11 @@ public final class MinecraftHistoricalGenerationOrchestrator {
 
         return new Result(
                 generated.committedEvent().isPresent(),
-                true,
-                removed,
+                true, removed,
                 generated.decision().roll(),
                 generated.decision().threshold());
     }
 
-    /**
-     * Temporary compatibility bridge for code compiled against M37-M41.
-     * New callers should construct HistoricalScope and call run(level, scope).
-     */
     @Deprecated
     public Result run(
             ServerLevel level,
