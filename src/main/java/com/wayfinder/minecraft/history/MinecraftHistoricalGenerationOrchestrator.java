@@ -11,6 +11,8 @@ import com.wayfinder.structure.materialization.MaterializationCommitService;
 import com.wayfinder.structure.materialization.MaterializationInspector;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.List;
+
 public final class MinecraftHistoricalGenerationOrchestrator {
 
     public Result run(ServerLevel level, HistoricalScope scope) {
@@ -23,13 +25,19 @@ public final class MinecraftHistoricalGenerationOrchestrator {
         var materialization = materializationRepository.load();
         var history = historyRepository.load();
 
-        var generator = new HistoricalGenerationService(
-                new ProceduralRouteLossSelector(),
-                new DeterministicRouteLossDecisionService(
-                        new DefaultRandomStreamFactory(new Sha256SeedDeriver())),
-                new HistoricalEventFactory(),
-                new HistoricalEventCommitService(),
-                new RouteLossTransitionService());
+        var streams = new DefaultRandomStreamFactory(new Sha256SeedDeriver());
+
+        var generator = new GeneralizedHistoricalGenerationService(
+                List.of(new RouteLossOpportunityProvider(
+                        new ProceduralRouteLossSelector())),
+                new DeterministicHistoricalOpportunitySelector(streams),
+                new HistoricalEventOccurrenceRegistry(List.of(
+                        new RouteLossOccurrenceDecider(streams))),
+                new HistoricalEventHandlerRegistry(List.of(
+                        new RouteLossHistoricalEventHandler(
+                                new RouteLossTransitionService(),
+                                new HistoricalEventFactory(),
+                                new HistoricalEventCommitService()))));
 
         var generated = generator.generate(
                 level.getSeed(),
@@ -45,29 +53,27 @@ public final class MinecraftHistoricalGenerationOrchestrator {
 
         var work = new HistoricalPhysicalizationPlanner().plan(history, materialization);
 
+        double roll = generated.occurrenceDecision()
+                .map(HistoricalEventOccurrenceDecision::roll)
+                .orElse(1.0);
+        double threshold = generated.occurrenceDecision()
+                .map(HistoricalEventOccurrenceDecision::threshold)
+                .orElse(0.0);
+
         if (!work.requiresPhysicalization() || work.targetNodeId().isEmpty()) {
             return new Result(
                     generated.committedEvent().isPresent(),
-                    false, 0,
-                    generated.decision().roll(),
-                    generated.decision().threshold());
+                    false, 0, roll, threshold);
         }
 
         var nodeId = work.targetNodeId().orElseThrow();
         var record = materialization.find(nodeId).orElseThrow();
 
-        /*
-         * The domain planner identifies a historically relevant target. Exact
-         * Minecraft block truth decides whether the consequence is still
-         * physically pending. This avoids using DAMAGED/LOST as a proxy.
-         */
         var physicalTruth = new MinecraftRouteLossPhysicalizationInspector();
         if (!physicalTruth.requiresPhysicalization(level, record)) {
             return new Result(
                     generated.committedEvent().isPresent(),
-                    false, 0,
-                    generated.decision().roll(),
-                    generated.decision().threshold());
+                    false, 0, roll, threshold);
         }
 
         int removed = new MinecraftRouteLossApplier()
@@ -83,20 +89,7 @@ public final class MinecraftHistoricalGenerationOrchestrator {
 
         return new Result(
                 generated.committedEvent().isPresent(),
-                true, removed,
-                generated.decision().roll(),
-                generated.decision().threshold());
-    }
-
-    @Deprecated
-    public Result run(
-            ServerLevel level,
-            String regionKey,
-            String eraKey,
-            int generationVersion
-    ) {
-        throw new UnsupportedOperationException(
-                "String historical scope is retired. Use run(ServerLevel, HistoricalScope).");
+                true, removed, roll, threshold);
     }
 
     public record Result(

@@ -2,7 +2,7 @@ package com.wayfinder.minecraft.command;
 
 import com.mojang.brigadier.context.CommandContext;
 import com.wayfinder.core.math.WorldPosition;
-import com.wayfinder.history.HistoricalScope;
+import com.wayfinder.minecraft.history.MinecraftHistoricalScopeResolver;
 import com.wayfinder.minecraft.history.MinecraftHistoricalGenerationOrchestrator;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
@@ -11,9 +11,6 @@ import net.minecraft.server.level.ServerLevel;
 import java.util.Locale;
 
 public final class HistoricalGenerationCommand {
-    private static final int CURRENT_ERA = 1;
-    private static final int GENERATION_VERSION = 1;
-
     private HistoricalGenerationCommand() {}
 
     public static int execute(CommandContext<CommandSourceStack> context) {
@@ -21,13 +18,13 @@ public final class HistoricalGenerationCommand {
         ServerLevel level = source.getLevel();
 
         var pos = source.getPosition();
-        var scope = HistoricalScope.at(
-                new WorldPosition(
-                        (int) Math.floor(pos.x()),
-                        (int) Math.floor(pos.y()),
-                        (int) Math.floor(pos.z())),
-                CURRENT_ERA,
-                GENERATION_VERSION);
+        var position = new WorldPosition(
+                (int) Math.floor(pos.x()),
+                (int) Math.floor(pos.y()),
+                (int) Math.floor(pos.z()));
+
+        var scope = new MinecraftHistoricalScopeResolver()
+                .resolve(level, position);
 
         var result = new MinecraftHistoricalGenerationOrchestrator()
                 .run(level, scope);

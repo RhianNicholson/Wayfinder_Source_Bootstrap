@@ -46,6 +46,10 @@ import com.wayfinder.geography.service.TerrainAnalysisService;
 import com.wayfinder.geography.visibility.HeightFieldVisibilityAnalyzer;
 import com.wayfinder.geography.visibility.ObservationVisibilityEvaluator;
 import com.wayfinder.minecraft.persistence.MinecraftSavedDataCivilizationRepository;
+import com.wayfinder.minecraft.persistence.MinecraftSavedDataCivilizationEraRepository;
+import com.wayfinder.history.CivilizationEraLifecycleService;
+import com.wayfinder.history.HistoricalRegionKey;
+import com.wayfinder.core.math.WorldPosition;
 import com.wayfinder.minecraft.world.NeoForgeWorldTerrainView;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -88,6 +92,8 @@ public final class WayfinderCommands {
                                 .executes(WayfinderDiscoveryStatusCommand::execute))
                         .then(Commands.literal("generatehistory")
                                 .executes(HistoricalGenerationCommand::execute))
+                        .then(Commands.literal("advanceera")
+                                .executes(WayfinderCommands::advanceEra))
         );
     }
 
@@ -383,6 +389,39 @@ public final class WayfinderCommands {
         if (admissionDecision.isPresent()) {
             logAdmission(admissionDecision.get(), committed, civilizationState);
         }
+
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int advanceEra(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        ServerLevel level = source.getLevel();
+
+        BlockPos pos = BlockPos.containing(
+                source.getPosition().x,
+                source.getPosition().y,
+                source.getPosition().z);
+
+        var region = HistoricalRegionKey.from(
+                new WorldPosition(pos.getX(), pos.getY(), pos.getZ()));
+
+        var repository =
+                new MinecraftSavedDataCivilizationEraRepository(level.getServer());
+        var state = repository.load();
+
+        var lifecycle = new CivilizationEraLifecycleService();
+        var transition = lifecycle.evaluateAdvance(state, region);
+        var updated = lifecycle.commit(state, transition);
+        repository.save(updated);
+
+        source.sendSuccess(
+                () -> Component.literal(String.format(
+                        Locale.ROOT,
+                        "Wayfinder era | region=%s | %d -> %d",
+                        region.stableKey(),
+                        transition.from().value(),
+                        transition.to().value())),
+                false);
 
         return Command.SINGLE_SUCCESS;
     }
